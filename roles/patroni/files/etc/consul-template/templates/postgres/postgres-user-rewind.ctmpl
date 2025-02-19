@@ -1,0 +1,5 @@
+{{- with pkiCert "pki_openstack_postgres_intermediate/issue/user-rewind" "common_name=rewind" -}}
+{{ .Cert }}{{ .CA }}{{ .CAChain }}{{ .Key }}
+{{ .Key | writeToFile "/etc/patroni/postgres-user-rewind.key" "" "" "0600" }}
+{{ (printf "%s%s" .Cert (.CAChain | join "")) | writeToFile "/etc/patroni/postgres-user-rewind.crt" "" "" "0644" }}
+{{- end -}}

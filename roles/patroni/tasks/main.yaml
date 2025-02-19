@@ -1,0 +1,269 @@
+---
+# Start Postgres
+- name: Create postgresql-common share
+  ansible.builtin.file:
+    path: /usr/share/postgresql-common/pgdg
+    state: directory
+    mode: "0755"
+
+- name: PostgreSQL keyring
+  ansible.builtin.get_url:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    dest: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+    checksum: sha256:0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
+    mode: "0644"
+
+- name: Add PostgreSQL repo
+  ansible.builtin.apt_repository:
+    repo: >
+      deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc]
+      https://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main
+    state: present
+
+- name: Install Patroni, PostgreSQL, and PgBouncer
+  ansible.builtin.package:
+    name:
+      - python3-psycopg2
+      - python3-consul
+      - postgresql-17
+      - patroni
+      - pgbouncer
+    state: present
+
+- name: Create Patroni Data Dir
+  ansible.builtin.file:
+    path: /var/lib/postgresql/17/patroni/
+    state: directory
+    mode: "0700"
+    owner: postgres
+    group: postgres
+
+- name: Disable PostgreSQL Service
+  ansible.builtin.systemd_service:
+    name: postgresql
+    # Patroni will be managing the postgresql process
+    state: stopped
+    enabled: false
+
+- name: Disable PgBouncer Service
+  ansible.builtin.systemd_service:
+    name: pgbouncer
+    enabled: false
+
+- name: Disable Patroni Service
+  ansible.builtin.systemd_service:
+    name: patroni
+    enabled: false
+
+- name: Own Patroni Config Dir
+  ansible.builtin.file:
+    path: /etc/patroni/
+    state: directory
+    mode: "0755"
+    owner: postgres
+    group: postgres
+
+- name: Own PgBouncer Config Dir
+  ansible.builtin.file:
+    path: /etc/pgbouncer/
+    state: directory
+    mode: "0755"
+    owner: postgres
+    group: postgres
+# End Postgres
+
+# Start Consul Config
+
+# End Consul Config
+
+# Start Consul Template Postgres
+- name: Add postgres to sudoers
+  community.general.sudoers:
+    name: postgres
+    user: postgres
+    nopassword: true
+    validation: required
+    commands:
+      - /usr/bin/systemctl reload-or-restart patroni
+      - /usr/bin/systemctl reload-or-restart pgbouncer
+    state: present
+
+- name: Configure Consul Template for Postgres
+  ansible.builtin.template:
+    src: etc/consul-template/consul-template-postgres.hcl
+    dest: /etc/consul-template/consul-template-postgres.hcl
+    mode: "0644"
+    owner: postgres
+    group: postgres
+  register: consul_template_postgres_config
+
+- name: Create Consul Template for Postgres Templates directory
+  ansible.builtin.file:
+    path: /etc/consul-template/templates/postgres/
+    state: directory
+    mode: "0744"
+    owner: postgres
+    group: postgres
+
+- name: Place Consul Template for Postgres Templates Files
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/consul-template/templates/postgres/{{ item | basename }}"
+    mode: "0644"
+    owner: postgres
+    group: postgres
+  with_fileglob:
+    - ../files/etc/consul-template/templates/postgres/*.ctmpl
+  register: consul_template_postgres_templates_files
+
+- name: Place Consul Template for Postgres Templates Templates
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "/etc/consul-template/templates/postgres/{{ item | basename }}"
+    mode: "0644"
+    owner: postgres
+    group: postgres
+  with_fileglob:
+    - ../templates/etc/consul-template/templates/postgres/*.ctmpl
+  register: consul_template_postgres_templates
+
+- name: Consul Template for Postgres SystemD
+  ansible.builtin.template:
+    src: etc/systemd/system/consul-template-postgres.service
+    dest: /etc/systemd/system/consul-template-postgres.service
+    mode: "0644"
+  register: consul_template_postgres_systemd
+
+- name: Consul Template for Postgres systemd # noqa: no-handler
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: consul_template_postgres_systemd.changed
+
+- name: Start and enable Consul Template for Postgres
+  ansible.builtin.systemd:
+    name: consul-template-postgres
+    state: started
+    enabled: true
+
+- name: Restart Consul Template for Postgres if config changed # noqa: no-handler
+  ansible.builtin.systemd:
+    name: consul-template-postgres
+    state: reloaded
+  when: consul_template_postgres_templates.changed or
+    consul_template_postgres_config.changed or
+    consul_template_postgres_templates_files.changed
+# End Consul Template Postgres
+
+# Start Patroni
+
+- name: Create Postgres Certificates
+  ansible.builtin.command: >-
+    step ca certificate {{ ansible_fqdn }}
+    /etc/patroni/postgres-server.crt
+    /etc/patroni/postgres-server.key
+    --ca-url https://step-ca.us-homelab1.hl.rmb938.me:8443
+    --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
+  args:
+    creates: "/etc/patroni/postgres-server.crt"
+
+- name: Own Postgres certificates
+  ansible.builtin.file:
+    path: /etc/patroni/{{ item }}
+    owner: postgres
+    group: postgres
+    mode: "0600"
+  with_items:
+    - postgres-server.crt
+    - postgres-server.key
+
+- name: Cron to renew Postgres certificates
+  ansible.builtin.cron:
+    name: "renew postgres certificates"
+    special_time: "hourly"
+    # Rekey needs to happen against the CA, RA's don't support rekey
+    # https://smallstep.com/docs/step-ca/registration-authority-ra-mode/#stepcas-limitations
+    job: >-
+      step ca rekey /etc/patroni/postgres-server.crt
+      /etc/patroni/postgres-server.key
+      --ca-url https://step-ca.us-homelab1.hl.rmb938.me
+      --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
+      --force --expires-in 720h --exec "systemctl try-reload-or-restart patroni"
+    state: present
+
+- name: Place Patroni Config
+  ansible.builtin.template:
+    src: etc/patroni/config.yml
+    dest: /etc/patroni/config.yml
+    mode: "0600"
+    owner: postgres
+    group: postgres
+  register: patroni_config
+
+- name: Restart Patroni if config changed # noqa: no-handler
+  ansible.builtin.systemd_service:
+    service: patroni
+    state: reloaded
+  when: patroni_config.changed
+# End Patroni
+
+# Start PgBouncer
+
+- name: Create PgBouncer Certificates
+  ansible.builtin.command: >-
+    step ca certificate {{ ansible_fqdn }}
+    /etc/pgbouncer/postgres-server.crt
+    /etc/pgbouncer/postgres-server.key
+    --ca-url https://step-ca.us-homelab1.hl.rmb938.me:8443
+    --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
+  args:
+    creates: "/etc/pgbouncer/postgres-server.crt"
+
+- name: Own PgBouncer certificates
+  ansible.builtin.file:
+    path: /etc/pgbouncer/{{ item }}
+    owner: postgres
+    group: postgres
+    mode: "0600"
+  with_items:
+    - postgres-server.crt
+    - postgres-server.key
+
+- name: Cron to renew PgBouncer certificates
+  ansible.builtin.cron:
+    name: "renew pgbouncer certificates"
+    special_time: "hourly"
+    # Rekey needs to happen against the CA, RA's don't support rekey
+    # https://smallstep.com/docs/step-ca/registration-authority-ra-mode/#stepcas-limitations
+    job: >-
+      step ca rekey /etc/pgbouncer/postgres-server.crt
+      /etc/pgbouncer/postgres-server.key
+      --ca-url https://step-ca.us-homelab1.hl.rmb938.me
+      --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
+      --force --expires-in 720h --exec "systemctl try-reload-or-restart pgbouncer"
+    state: present
+
+- name: Place PgBouncer Config
+  ansible.builtin.template:
+    src: etc/pgbouncer/pgbouncer.ini
+    dest: /etc/pgbouncer/pgbouncer.ini
+    mode: "0600"
+    owner: postgres
+    group: postgres
+  register: pgbouncer_config
+
+- name: Place PgBouncer HBA
+  ansible.builtin.template:
+    src: etc/pgbouncer/pg_hba.conf
+    dest: /etc/pgbouncer/pg_hba.conf
+    mode: "0600"
+    owner: postgres
+    group: postgres
+  register: pgbouncer_hba
+
+- name: Restart PgBouncer if config changed # noqa: no-handler
+  ansible.builtin.systemd_service:
+    service: pgbouncer
+    state: reloaded
+  when: pgbouncer_config.changed or
+    pgbouncer_hba.changed
+# End PgBouncer

@@ -1,0 +1,120 @@
+# {{ ansible_managed }}
+
+scope: openstack-postgres
+name: "{{ ansible_fqdn }}"
+namespace: openstack-postgres
+
+log:
+  format: "%(asctime)s %(levelname)s: %(message)s"
+  level: INFO
+  max_queue_size: 1000
+  traceback_level: ERROR
+  type: plain
+
+restapi:
+  connect_address: "{{ ansible_fqdn }}:8008"
+  listen: 0.0.0.0:8008
+  certfile: /etc/patroni/postgres-server.crt
+  keyfile: /etc/patroni/postgres-server.key
+
+  # When optional client certificates are required for all unsafe REST API endpoints.
+  verify_client: optional
+  cafile: /etc/patroni/patroni-client-ca.crt
+
+ctl:
+  certfile: /etc/patroni/patroni-client.crt
+  keyfile: /etc/patroni/patroni-client.key
+  cacert: /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
+
+# The bootstrap configuration. Works only when the cluster is not yet initialized.
+# If the cluster is already initialized, all changes in the `bootstrap` section are ignored!
+bootstrap:
+  # This section will be written into <dcs>:/<namespace>/<scope>/config after initializing
+  # new cluster and all other cluster members will use it as a `global configuration`.
+  # WARNING! If you want to change any of the parameters that were set up
+  # via `bootstrap.dcs` section, please use `patronictl edit-config`!
+  dcs:
+    loop_wait: 10
+    retry_timeout: 10
+    ttl: 30
+    postgresql:
+      parameters:
+        hot_standby: "on"
+        max_connections: 100
+        max_locks_per_transaction: 64
+        max_prepared_transactions: 0
+        max_replication_slots: 10
+        max_wal_senders: 10
+        max_worker_processes: 8
+        track_commit_timestamp: "off"
+        wal_keep_size: 128MB
+        wal_level: replica
+        wal_log_hints: "on"
+      use_pg_rewind: true
+      use_slots: true
+
+consul:
+  host: "127.0.0.1"
+  port: 8500
+  schema: http
+  consistency: consistent
+  register_service: true
+
+postgresql:
+  authentication:
+    replication:
+      username: replicator
+      sslmode: verify-full
+      sslcert: /etc/patroni/postgres-user-replicator.crt
+      sslkey: /etc/patroni/postgres-user-replicator.key
+      sslrootcert: system
+    rewind:
+      username: rewind
+      sslmode: verify-full
+      sslcert: /etc/patroni/postgres-user-rewind.crt
+      sslkey: /etc/patroni/postgres-user-rewind.key
+      sslrootcert: system
+    superuser:
+      username: postgres
+      sslmode: verify-full
+      sslcert: /etc/patroni/postgres-user-postgres.crt
+      sslkey: /etc/patroni/postgres-user-postgres.key
+      sslrootcert: system
+  bin_dir: /usr/lib/postgresql/17/bin/
+  data_dir: /var/lib/postgresql/17/patroni/
+  listen: 0.0.0.0:5432
+  connect_address: "{{ ansible_fqdn }}:5432"
+  proxy_address: "{{ ansible_fqdn }}:6432"
+  use_unix_socket: true
+  use_unix_socket_repl: true
+  parameters:
+    ssl: true
+    ssl_cert_file: "/etc/patroni/postgres-server.crt"
+    ssl_key_file: "/etc/patroni/postgres-server.key"
+    ssl_ca_file: "/etc/patroni/postgres-client-ca.crt"
+    password_encryption: "scram-sha-256"
+    unix_socket_directories: /var/run/postgresql
+    unix_socket_permissions: "0700"
+  pg_hba:
+    # Local Connections
+    - local   replication replicator trust
+    - local   all         rewind     trust
+    - local   postgres    postgres   trust
+
+    # TODO: pull allowed IPs with consul template services
+    # include unhealthy to prevent constant reloads
+    - hostssl replication replicator all cert
+    - hostssl all         rewind     all cert
+    - hostssl all         postgres   all cert
+
+    # Anyone with socket access is blindly trusted
+    # If you have socket access you have db file access
+    # so it doesn't matter
+    - local   all         all        trust
+
+tags:
+  clonefrom: true
+  failover_priority: 1
+  noloadbalance: false
+  nostream: false
+  nosync: false

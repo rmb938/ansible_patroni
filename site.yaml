@@ -1,0 +1,6 @@
+- name: Patroni
+  hosts: all
+  remote_user: ubuntu
+  become: true
+  roles:
+    - patroni

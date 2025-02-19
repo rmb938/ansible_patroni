@@ -1,0 +1,5 @@
+{{- with pkiCert "pki_openstack_postgres_patroni_intermediate/issue/client" "common_name=patroni" -}}
+{{ .Cert }}{{ .CA }}{{ .CAChain }}{{ .Key }}
+{{ .Key | writeToFile "/etc/patroni/patroni-client.key" "" "" "0600" }}
+{{ (printf "%s%s" .Cert (.CAChain | join "")) | writeToFile "/etc/patroni/patroni-client.crt" "" "" "0644" }}
+{{- end -}}

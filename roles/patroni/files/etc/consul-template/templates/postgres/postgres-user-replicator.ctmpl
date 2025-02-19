@@ -1,0 +1,5 @@
+{{- with pkiCert "pki_openstack_postgres_intermediate/issue/user-replicator" "common_name=replicator" -}}
+{{ .Cert }}{{ .CA }}{{ .CAChain }}{{ .Key }}
+{{ .Key | writeToFile "/etc/patroni/postgres-user-replicator.key" "" "" "0600" }}
+{{ (printf "%s%s" .Cert (.CAChain | join "")) | writeToFile "/etc/patroni/postgres-user-replicator.crt" "" "" "0644" }}
+{{- end -}}
