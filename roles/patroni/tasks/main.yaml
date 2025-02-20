@@ -1,4 +1,35 @@
 ---
+- name: Create datavg
+  community.general.lvg:
+    vg: data
+    pvs: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+
+- name: Create postgres lv
+  community.general.lvol:
+    vg: data
+    lv: postgres
+    size: 95G
+
+- name: Format postgres lv
+  community.general.filesystem:
+    fstype: xfs
+    dev: /dev/data/postgres
+
+- name: Mount postgres drive
+  ansible.posix.mount:
+    path: /var/lib/postgresql/
+    src: /dev/data/postgres
+    fstype: xfs
+    boot: true
+    state: mounted
+
+- name: Own postgres drive
+  ansible.builtin.file:
+    path: /var/lib/postgresql/
+    owner: root
+    group: root
+    mode: "0777"
+
 # Start Postgres
 - name: Create postgresql-common share
   ansible.builtin.file:
@@ -71,10 +102,6 @@
     owner: postgres
     group: postgres
 # End Postgres
-
-# Start Consul Config
-
-# End Consul Config
 
 # Start Consul Template Postgres
 - name: Add postgres to sudoers
@@ -155,7 +182,6 @@
 # End Consul Template Postgres
 
 # Start Patroni
-
 - name: Create Postgres Certificates
   ansible.builtin.command: >-
     step ca certificate {{ ansible_fqdn }}
@@ -189,25 +215,9 @@
       --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
       --force --expires-in 720h --exec "systemctl try-reload-or-restart patroni"
     state: present
-
-- name: Place Patroni Config
-  ansible.builtin.template:
-    src: etc/patroni/config.yml
-    dest: /etc/patroni/config.yml
-    mode: "0600"
-    owner: postgres
-    group: postgres
-  register: patroni_config
-
-- name: Restart Patroni if config changed # noqa: no-handler
-  ansible.builtin.systemd_service:
-    service: patroni
-    state: reloaded
-  when: patroni_config.changed
 # End Patroni
 
 # Start PgBouncer
-
 - name: Create PgBouncer Certificates
   ansible.builtin.command: >-
     step ca certificate {{ ansible_fqdn }}

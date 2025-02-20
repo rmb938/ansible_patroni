@@ -23,6 +23,17 @@ wait {
   max = "30s"
 }
 
+# Patroni Config
+template {
+  source = "/etc/consul-template/templates/postgres/patroni-config.yml.ctmpl"
+  destination = "/etc/patroni/config.yml"
+  create_dest_dirs = false
+  perms = "0600"
+  exec {
+    command = "sudo systemctl reload-or-restart patroni || true"
+  }
+}
+
 # Patroni Client CA
 template {
   source = "/etc/consul-template/templates/postgres/patroni-client-ca.crt.ctmpl"

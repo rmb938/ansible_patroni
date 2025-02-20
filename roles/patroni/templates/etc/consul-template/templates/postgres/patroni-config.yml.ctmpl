@@ -1,8 +1,11 @@
 # {{ ansible_managed }}
+# Consul Template Managed - postgres
+{% raw %}{{ $myPgCluster := (mustEnv "CONSUL_ROLE") }}{% endraw %}
 
-scope: openstack-postgres
-name: "{{ ansible_fqdn }}"
-namespace: openstack-postgres
+scope: {% raw %}{{ $myPgCluster }}{% endraw %}
+
+name: "{% raw %}{{ (mustEnv "HOSTNAME") }}{% endraw %}"
+namespace: {% raw %}{{ $myPgCluster }}{% endraw %}
 
 log:
   format: "%(asctime)s %(levelname)s: %(message)s"
@@ -12,7 +15,7 @@ log:
   type: plain
 
 restapi:
-  connect_address: "{{ ansible_fqdn }}:8008"
+  connect_address: "{% raw %}{{ (mustEnv "HOSTNAME") }}{% endraw %}:8008"
   listen: 0.0.0.0:8008
   certfile: /etc/patroni/postgres-server.crt
   keyfile: /etc/patroni/postgres-server.key
@@ -37,6 +40,15 @@ bootstrap:
     loop_wait: 10
     retry_timeout: 10
     ttl: 30
+    # Max history so we don't get too large
+    # this may need to be smaller
+    max_timelines_history: 1000
+    # Enforce checking timeline so we don't accidently rollback and loose data
+    # Ex. If leader is stopped, new leader is elected, data is written, then all
+    # nodes are stopped. If the first leader is started it'll become leader and
+    # cause other nodes that are started to be out of sync and cause data loss.
+    # Checking timeline prevents a node from becoming leader if it's on an old timeline.
+    check_timeline: true
     postgresql:
       parameters:
         hot_standby: "on"
@@ -83,8 +95,8 @@ postgresql:
   bin_dir: /usr/lib/postgresql/17/bin/
   data_dir: /var/lib/postgresql/17/patroni/
   listen: 0.0.0.0:5432
-  connect_address: "{{ ansible_fqdn }}:5432"
-  proxy_address: "{{ ansible_fqdn }}:6432"
+  connect_address: "{% raw %}{{ (mustEnv "HOSTNAME") }}{% endraw %}:5432"
+  proxy_address: "{% raw %}{{ (mustEnv "HOSTNAME") }}{% endraw %}:6432"
   use_unix_socket: true
   use_unix_socket_repl: true
   parameters:
@@ -96,21 +108,31 @@ postgresql:
     unix_socket_directories: /var/run/postgresql
     unix_socket_permissions: "0700"
   pg_hba:
-    # Local Connections
-    - local   replication replicator trust
-    - local   all         rewind     trust
-    - local   postgres    postgres   trust
-
-    # TODO: pull allowed IPs with consul template services
-    # include unhealthy to prevent constant reloads
-    - hostssl replication replicator all cert
-    - hostssl all         rewind     all cert
-    - hostssl all         postgres   all cert
-
     # Anyone with socket access is blindly trusted
     # If you have socket access you have db file access
     # so it doesn't matter
+    # Local Connections, specific users for patroni
+    - local   replication replicator trust
+    - local   all         rewind     trust
+    - local   postgres    postgres   trust
+    # Local Connections, everyone else
     - local   all         all        trust
+
+    # Allow other nodes in the cluster to connect
+    {% raw %}
+    # Using consul nodes instead of services because all the patroni services
+    # won't be created until all the nodes are clustered, so you end up with a
+    # chicken and egg situation. So using nodes with filtering on the consul_role
+    # since it should be unique for the cluster.
+    {{- range nodes }}
+    {{- if eq .Meta.consul_role $myPgCluster }}
+    # Consul Node - {{ .Node }}
+    - hostssl replication replicator {{ .Address }}/32 cert
+    - hostssl all         rewind     {{ .Address }}/32 cert
+    - hostssl all         postgres   {{ .Address }}/32 cert
+    {{- end }}
+    {{- end }}
+    {% endraw %}
 
 tags:
   clonefrom: true
