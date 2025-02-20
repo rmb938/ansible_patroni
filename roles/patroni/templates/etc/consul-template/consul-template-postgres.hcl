@@ -78,6 +78,17 @@ template {
   }
 }
 
+# PG Bounder Server Certificate
+template {
+  source = "/etc/consul-template/templates/postgres/pgbouncer-server.ctmpl"
+  destination = "/etc/pgbouncer/pgbouncer-server.rendered"
+  create_dest_dirs = false
+  perms = "0600"
+  exec {
+    command = "sudo systemctl reload-or-restart pgbouncer || true"
+  }
+}
+
 # Postgres Users
 template {
   source = "/etc/consul-template/templates/postgres/postgres-user-postgres.ctmpl"

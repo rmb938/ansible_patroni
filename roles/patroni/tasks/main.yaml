@@ -1,4 +1,19 @@
 ---
+- name: HAProxy Postgres Service Consul Config
+  ansible.builtin.template:
+    src: etc/consul.d/50_haproxy-postgres.service.hcl
+    dest: /etc/consul.d/50_haproxy-postgres.service.hcl
+    mode: "0644"
+    owner: consul
+    group: consul
+  register: haproxy_postgres_service_consul_config
+
+- name: Restart Consul # noqa: no-handler
+  ansible.builtin.systemd_service:
+    name: consul
+    state: restarted
+  when: haproxy_postgres_service_consul_config.changed
+
 - name: Create datavg
   community.general.lvg:
     vg: data
@@ -218,40 +233,6 @@
 # End Patroni
 
 # Start PgBouncer
-- name: Create PgBouncer Certificates
-  ansible.builtin.command: >-
-    step ca certificate {{ ansible_fqdn }}
-    /etc/pgbouncer/postgres-server.crt
-    /etc/pgbouncer/postgres-server.key
-    --ca-url https://step-ca.us-homelab1.hl.rmb938.me:8443
-    --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
-  args:
-    creates: "/etc/pgbouncer/postgres-server.crt"
-
-- name: Own PgBouncer certificates
-  ansible.builtin.file:
-    path: /etc/pgbouncer/{{ item }}
-    owner: postgres
-    group: postgres
-    mode: "0600"
-  with_items:
-    - postgres-server.crt
-    - postgres-server.key
-
-- name: Cron to renew PgBouncer certificates
-  ansible.builtin.cron:
-    name: "renew pgbouncer certificates"
-    special_time: "hourly"
-    # Rekey needs to happen against the CA, RA's don't support rekey
-    # https://smallstep.com/docs/step-ca/registration-authority-ra-mode/#stepcas-limitations
-    job: >-
-      step ca rekey /etc/pgbouncer/postgres-server.crt
-      /etc/pgbouncer/postgres-server.key
-      --ca-url https://step-ca.us-homelab1.hl.rmb938.me
-      --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
-      --force --expires-in 720h --exec "systemctl try-reload-or-restart pgbouncer"
-    state: present
-
 - name: Place PgBouncer Config
   ansible.builtin.template:
     src: etc/pgbouncer/pgbouncer.ini
@@ -277,3 +258,52 @@
   when: pgbouncer_config.changed or
     pgbouncer_hba.changed
 # End PgBouncer
+
+# Start HAProxy
+- name: Add HAProxy 3.0 PPA
+  ansible.builtin.apt_repository:
+    repo: ppa:vbernat/haproxy-3.0
+    state: present
+
+- name: Install HAProxy
+  ansible.builtin.package:
+    name: 'haproxy=3.0.*'
+    state: present
+
+- name: Own HAProxy Dir
+  ansible.builtin.file:
+    path: /etc/haproxy
+    state: directory
+    mode: '0755'
+    owner: haproxy
+    group: haproxy
+
+- name: Own HAProxy Config
+  ansible.builtin.file:
+    path: /etc/haproxy/haproxy.cfg
+    state: file
+    mode: "0644"
+    owner: haproxy
+    group: haproxy
+
+- name: Configure HAProxy
+  ansible.builtin.template:
+    src: etc/haproxy/haproxy.cfg
+    dest: /etc/haproxy/haproxy.cfg
+    mode: "0644"
+    owner: haproxy
+    group: haproxy
+  register: haproxy_config
+
+- name: Start HAProxy
+  ansible.builtin.systemd:
+    name: haproxy
+    state: started
+    enabled: true
+
+- name: Reload HAProxy # noqa: no-handler
+  ansible.builtin.systemd:
+    name: haproxy
+    state: reloaded
+  when: haproxy_config.changed
+# End HAProxy
