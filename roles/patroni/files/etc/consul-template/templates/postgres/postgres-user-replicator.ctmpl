@@ -1,4 +1,5 @@
-{{- with pkiCert "pki_openstack_postgres_intermediate/issue/user-replicator" "common_name=replicator" -}}
+{{ $myPgCluster := (mustEnv "CONSUL_ROLE") }}
+{{- with pkiCert (printf "pki_%s_intermediate/issue/user-replicator" ($myPgCluster | replaceAll "-" "_")) "common_name=replicator" -}}
 {{ .Cert }}{{ .CA }}{{ .CAChain }}{{ .Key }}
 {{ .Key | writeToFile "/etc/patroni/postgres-user-replicator.key" "" "" "0600" }}
 {{ (printf "%s%s" .Cert (.CAChain | join "")) | writeToFile "/etc/patroni/postgres-user-replicator.crt" "" "" "0644" }}

@@ -1,3 +1,4 @@
-{{ with secret "pki_openstack_postgres_patroni_root/cert/ca" }}
+{{ $myPgCluster := (mustEnv "CONSUL_ROLE") }}
+{{ with secret (printf "pki_%s_patroni_root/cert/ca" ($myPgCluster | replaceAll "-" "_")) }}
 {{ .Data.certificate }}
 {{ end }}
