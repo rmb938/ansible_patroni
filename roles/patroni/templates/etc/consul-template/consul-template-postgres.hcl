@@ -119,3 +119,14 @@ template {
     command = "sudo systemctl reload-or-restart patroni || true"
   }
 }
+
+# Postgres Databases
+template {
+  source = "/etc/consul-template/templates/postgres/databases.sql.ctmpl"
+  destination = "/etc/patroni/databases.sql"
+  create_dest_dirs = false
+  perms = "0600"
+  exec {
+    command = "psql 'host=primary.openstack-postgres.service.consul port=7432 sslcert=/etc/patroni/postgres-user-postgres.crt sslkey=/etc/patroni/postgres-user-postgres.key sslmode=verify-full sslrootcert=/etc/pgbouncer/postgres-client-ca.crt user=postgres' -f /etc/patroni/databases.sql || true"
+  }
+}
