@@ -43,7 +43,7 @@
     path: /var/lib/postgresql/
     owner: root
     group: root
-    mode: "0777"
+    mode: "0755"
 
 # Start Postgres
 - name: Create postgresql-common share
