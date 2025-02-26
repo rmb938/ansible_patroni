@@ -41,8 +41,8 @@
 - name: Own postgres drive
   ansible.builtin.file:
     path: /var/lib/postgresql/
-    owner: root
-    group: root
+    owner: postgres
+    group: postgres
     mode: "0755"
 
 # Start Postgres
