@@ -41,8 +41,8 @@
 - name: Own postgres drive
   ansible.builtin.file:
     path: /var/lib/postgresql/
-    owner: postgres
-    group: postgres
+    owner: root
+    group: root
     mode: "0755"
 
 # Start Postgres
@@ -75,6 +75,14 @@
       - patroni
       - pgbouncer
     state: present
+
+- name: Create Postgres 17 Data Dir
+  ansible.builtin.file:
+    path: /var/lib/postgresql/17
+    state: directory
+    mode: "0755"
+    owner: postgres
+    group: postgres
 
 - name: Create Patroni Data Dir
   ansible.builtin.file:
@@ -250,6 +258,11 @@
     owner: postgres
     group: postgres
   register: pgbouncer_hba
+
+- name: Enable PgBouncer
+  ansible.builtin.systemd:
+    name: pgbouncer
+    enabled: true
 
 - name: Restart PgBouncer if config changed # noqa: no-handler
   ansible.builtin.systemd_service:
