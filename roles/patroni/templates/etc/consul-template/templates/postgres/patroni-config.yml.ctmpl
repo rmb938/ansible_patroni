@@ -1,5 +1,9 @@
 # {{ ansible_managed }}
 # Consul Template Managed - postgres
+# Used to re-render every boot so the service starts
+{% raw %}
+# Boot ID - {{ file "/proc/sys/kernel/random/boot_id" }}
+{% endraw %}
 {% raw %}{{ $myPgCluster := (mustEnv "CONSUL_ROLE") }}{% endraw %}
 
 scope: {% raw %}{{ $myPgCluster }}{% endraw %}

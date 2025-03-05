@@ -41,9 +41,11 @@
 - name: Own postgres drive
   ansible.builtin.file:
     path: /var/lib/postgresql/
-    owner: root
-    group: root
-    mode: "0755"
+    # TODO: on new installs postgres user doesn't exist
+    # switch back to root for install
+    owner: postgres
+    group: postgres
+    mode: "0750"
 
 # Start Postgres
 - name: Create postgresql-common share
@@ -99,10 +101,11 @@
     state: stopped
     enabled: false
 
-- name: Disable PgBouncer Service
-  ansible.builtin.systemd_service:
-    name: pgbouncer
-    enabled: false
+# Full configs aren't controlled by consul template yet, so we can't disable
+# - name: Disable PgBouncer Service
+#   ansible.builtin.systemd_service:
+#     name: pgbouncer
+#     enabled: false
 
 - name: Disable Patroni Service
   ansible.builtin.systemd_service:
